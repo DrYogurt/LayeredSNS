@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import copy
 
 class GsynModule(nn.Module):
     def __init__(self, n, activation_fn, G_min=None, G_max=None, G_scale=None):
@@ -32,7 +33,7 @@ class GsynModule(nn.Module):
 class ConductanceLayerMulti(nn.Module):
     def __init__(self, n, n_prev, dt=None,
                  C_mem=None, G_mem=None, b_mem=None, 
-                 Esyn_self=None, E_syn_prev=None,
+                 Esyn_self=None, Esyn_prev=None,
                  Gsyn_self=None, Gsyn_prev=None,
                  is_first=False
                 ):
@@ -49,8 +50,8 @@ class ConductanceLayerMulti(nn.Module):
             b_mem = torch.rand(n, dtype=torch.double)
         if Esyn_self is None:
             Esyn_self = torch.rand(n, n, dtype=torch.double)
-        if E_syn_prev is None:
-            E_syn_prev = torch.rand(n, n, dtype=torch.double)
+        if Esyn_prev is None:
+            Esyn_prev = torch.rand(n, n, dtype=torch.double)
         
         self.n = n
         self.is_first = is_first
@@ -59,7 +60,7 @@ class ConductanceLayerMulti(nn.Module):
         self.G_mem = nn.Parameter(G_mem)
         self.b_mem = nn.Parameter(b_mem)
         self.Esyn_self = nn.Parameter(Esyn_self)
-        self.Esyn_prev = nn.Parameter(E_syn_prev)
+        self.Esyn_prev = nn.Parameter(Esyn_prev)
         
         # Gsyn modules
         if Gsyn_self is None:
@@ -83,7 +84,7 @@ class ConductanceLayerMulti(nn.Module):
             dp = self.Esyn_prev - row_repeat_u_self
             dp = torch.matmul(dp, self.Gsyn_prev(u_prev))
 
-        du = (-self.G_mem * u_self + self.b_mem + ds.sum(dim=1) + dp.sum(dim=1)) * (self.dt / self.C_mem)
+        du = (-self.G_mem * u_self + self.b_mem + ds.sum() + dp.sum()) * (self.dt / self.C_mem)
         return u_self + du
 
 class ConductanceNetwork(nn.Module):
@@ -92,11 +93,12 @@ class ConductanceNetwork(nn.Module):
         self.layers = layers
         # previous states are 1 indexed, and state '0' is used to store the inputs
         self.current_states = [torch.zeros(layer.n) for layer in self.layers]
-        self.prev_states = [state.clone() for state in self.current_states]
+        self.prev_states = [state.clone().detach() for state in self.current_states]
 
     def forward(self, inp):
         self.prev_states.insert(0, inp)
         for i, layer in enumerate(self.layers):
             self.current_states[i] = layer(self.prev_states[i+1], self.prev_states[i])
-        self.prev_states = self.current_states
+        self.prev_states = [state.clone().detach() for state in self.current_states]
+        assert(len(self.current_states) == len(self.layers))
         return self.current_states[-1]
