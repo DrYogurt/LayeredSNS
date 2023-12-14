@@ -24,11 +24,11 @@ class GsynModule(nn.Module):
         self.activation_fn = activation_fn
 
     def forward(self, u):
-        row_repeat_u = u.expand(*self.G_scale.size())
+        row_repeat_u = u.unsqueeze(-1).expand(*u.size(), u.size(-1))
         unscaled_u = (row_repeat_u - self.G_min) / (self.G_max - self.G_min)
         activated_u = self.activation_fn(unscaled_u)
         scaled_u = activated_u * (self.G_max - self.G_min) + self.G_min
-        return scaled_u * self.G_scale
+        return scaled_u * self.G_scale # sum over each column to get a single value for each row 
 
 class ConductanceLayerMulti(nn.Module):
     def __init__(self, n, n_prev, dt=None,
@@ -74,17 +74,23 @@ class ConductanceLayerMulti(nn.Module):
             self.Gsyn_prev = Gsyn_prev
 
     def forward(self, u_self, u_prev):
-        row_repeat_u_self = u_self.expand(*u_self.size(), u_self.size(-1))
-        ds = self.Esyn_self - row_repeat_u_self
-        ds = torch.matmul(ds, self.Gsyn_self(u_self)) 
+        row_repeat_u_self = u_self.unsqueeze(-1).expand(*u_self.size(), u_self.size(-1))
+        
+        # here, we should be finding the input to each neuron i_syn = G_syn * (E_syn - u)
+        ds = self.Esyn_self - row_repeat_u_self #TODO check this guy
+        ds = self.Gsyn_self(u_self)* ds #TODO check this guy
+        ds = torch.sum(ds, dim=1) # sum over each column to get a single value for each row
 
         if self.is_first:
-            dp = u_prev * torch.eye(u_prev.size(-1))
+            dp = u_prev #if the layer is first, dp is the input
         else:
             dp = self.Esyn_prev - row_repeat_u_self
-            dp = torch.matmul(dp, self.Gsyn_prev(u_prev))
+            dp = self.Gsyn_prev(u_self) * dp
+            dp = torch.sum(dp, dim=1) # sum over each column to get a single value for each row
 
-        du = (-self.G_mem * u_self + self.b_mem + ds.sum() + dp.sum()) * (self.dt / self.C_mem)
+        assert ds.shape == dp.shape and ds.shape == u_self.shape
+        
+        du = (-self.G_mem * u_self + self.b_mem + ds + dp) * (self.dt / self.C_mem)
         return u_self + du
 
 class ConductanceNetwork(nn.Module):
