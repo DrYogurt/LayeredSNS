@@ -78,14 +78,14 @@ class ConductanceLayerMulti(nn.Module):
         
         # here, we should be finding the input to each neuron i_syn = G_syn * (E_syn - u)
         ds = self.Esyn_self - row_repeat_u_self #TODO check this guy
-        ds = self.Gsyn_self(u_self)* ds #TODO check this guy
+        ds = self.Gsyn_self(u_self) * ds #TODO check this guy
         ds = torch.sum(ds, dim=1) # sum over each column to get a single value for each row
 
         if self.is_first:
             dp = u_prev #if the layer is first, dp is the input
         else:
             dp = self.Esyn_prev - row_repeat_u_self
-            dp = self.Gsyn_prev(u_self) * dp
+            dp = self.Gsyn_prev(u_prev) * dp
             dp = torch.sum(dp, dim=1) # sum over each column to get a single value for each row
 
         assert ds.shape == dp.shape and ds.shape == u_self.shape
